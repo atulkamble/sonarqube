@@ -25,6 +25,365 @@ sudo docker container ls
 update password 
 ```
 
+Got you, Atul. Here’s a clean, production-friendly way to run **SonarQube (Community) + PostgreSQL** via Docker Compose—complete with persistence, healthchecks, and the host settings SonarQube needs. Then I’ll show two “use” paths: scanning a project from your laptop/runner, and scanning inside Docker.
+
+---
+
+# 1) Prereqs (host)
+
+* **CPU/RAM:** ≥ 4 vCPU, **8–12 GB RAM** (SonarQube + ES needs memory)
+* **Ports:** 9000 (SonarQube), 5432 (Postgres, optional external access)
+* **Docker:** Engine ≥ 20.10 & Compose V2
+
+### Host kernel limits (ElasticSearch requirement)
+
+Run these once on the host (Amazon Linux/Ubuntu/etc.):
+
+```bash
+# Required for embedded Elasticsearch
+sudo sysctl -w vm.max_map_count=262144
+sudo sysctl -w fs.file-max=65536
+
+# Make persistent
+echo "vm.max_map_count=262144" | sudo tee /etc/sysctl.d/99-sonarqube.conf
+echo "fs.file-max=65536"       | sudo tee -a /etc/sysctl.d/99-sonarqube.conf
+sudo sysctl --system
+```
+
+> If you run SonarQube as **rootless Docker** or under strict kernels/VMs, still apply the sysctl on the host—setting it just inside the container can be ignored by the kernel.
+
+---
+
+# 2) Project layout
+
+```text
+sonarqube-docker/
+├─ .env
+├─ docker-compose.yml
+└─ sonar/
+   └─ extensions/        # place extra plugins if needed (JARs)
+```
+
+**.env** (edit passwords/users as needed):
+
+```env
+# Postgres
+POSTGRES_USER=sonar
+POSTGRES_PASSWORD=sonarpass
+POSTGRES_DB=sonarqube
+
+# SonarQube (JDBC to Postgres container)
+SONAR_JDBC_USERNAME=sonar
+SONAR_JDBC_PASSWORD=sonarpass
+SONAR_JDBC_URL=jdbc:postgresql://postgres:5432/sonarqube
+
+# Optional: tune Java heap for SQ (adjust to your RAM)
+SONARQUBE_JAVA_XMS=1g
+SONARQUBE_JAVA_XMX=2g
+```
+
+**docker-compose.yml**
+
+```yaml
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: postgres-sonar
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks:
+      - sonar-net
+
+  sonarqube:
+    image: sonarqube:latest-community
+    container_name: sonarqube
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    environment:
+      SONAR_JDBC_USERNAME: ${SONAR_JDBC_USERNAME}
+      SONAR_JDBC_PASSWORD: ${SONAR_JDBC_PASSWORD}
+      SONAR_JDBC_URL: ${SONAR_JDBC_URL}
+
+      # JVM options (adjust as needed)
+      SONARQUBE_JAVA_OPTS: "-Xms${SONARQUBE_JAVA_XMS} -Xmx${SONARQUBE_JAVA_XMX} -XX:+HeapDumpOnOutOfMemoryError -Djava.net.preferIPv4Stack=true"
+
+    # Helpful ulimits for ES & file handles
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+      nproc: 4096
+
+    # Set kernel params in container namespace (host sysctl still recommended)
+    sysctls:
+      - vm.max_map_count=262144
+
+    volumes:
+      - sq_data:/opt/sonarqube/data
+      - sq_logs:/opt/sonarqube/logs
+      - sq_extensions:/opt/sonarqube/extensions
+      - ./sonar/extensions:/opt/sonarqube/extensions/extra:ro
+    healthcheck:
+      test: ["CMD", "bash", "-c", "curl -f http://localhost:9000/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+    networks:
+      - sonar-net
+
+networks:
+  sonar-net:
+
+volumes:
+  pg_data:
+  sq_data:
+  sq_logs:
+  sq_extensions:
+```
+
+> **Why these volumes?**
+>
+> * `pg_data`: Postgres persistence
+> * `sq_data`: SonarQube indices & data
+> * `sq_logs`: logs you can tail outside the container
+> * `sq_extensions`: plugins (persist across upgrades)
+
+---
+
+# 3) Bring it up
+
+```bash
+docker compose pull
+docker compose up -d
+docker compose ps
+docker compose logs -f sonarqube
+```
+
+Open: **http\://SERVER\_IP:9000**
+Default login: **admin / admin** → you’ll be forced to set a new password on first login.
+
+---
+
+# 4) “Use” SonarQube – two quick paths
+
+## A) Scan from your machine/runner (recommended for CI)
+
+1. **Generate a project & token**
+
+   * In SonarQube UI: **Projects → Create Project** (Manually), pick a key like `inventory-manager`.
+   * **Administration → Security → Users/Tokens**: create **User Token** (copy it).
+
+2. **Install sonar-scanner** locally or on your CI agent:
+
+**macOS (Homebrew):**
+
+```bash
+brew install sonar-scanner
+```
+
+**Linux (generic):**
+
+```bash
+# Download from SonarSource; unzip to /opt/sonar-scanner; add to PATH
+# Example path:
+export PATH=/opt/sonar-scanner/bin:$PATH
+sonar-scanner -v
+```
+
+3. In your repo root, create **sonar-project.properties**:
+
+```properties
+sonar.projectKey=inventory-manager
+sonar.projectName=Inventory Manager
+sonar.projectVersion=1.0
+
+# Where to scan
+sonar.sources=.
+
+# Optional: language-specific tweaks
+# sonar.language=java
+
+# Point to your SQ server
+sonar.host.url=http://YOUR_SERVER_IP:9000
+
+# Set token via env for security
+# export SONAR_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+4. Run a scan:
+
+```bash
+export SONAR_TOKEN=YOUR_TOKEN_HERE
+sonar-scanner \
+  -Dsonar.login=$SONAR_TOKEN
+```
+
+Navigate to your project in the UI to see **Issues, Code Smells, Coverage (if you feed reports), and Quality Gate**.
+
+> **Coverage:** Feed your unit test coverage (e.g., Jacoco, lcov, Cobertura) with the corresponding properties (`sonar.javascript.lcov.reportPaths`, `sonar.java.coveragePlugin`, etc.) so dashboards show coverage.
+
+---
+
+## B) Scan inside Docker (no local install)
+
+From your repo directory:
+
+```bash
+# Example for generic (non-Java) project:
+docker run --rm \
+  -e SONAR_HOST_URL="http://YOUR_SERVER_IP:9000" \
+  -e SONAR_LOGIN="YOUR_TOKEN_HERE" \
+  -v "$PWD":/usr/src \
+  sonarsource/sonar-scanner-cli:latest
+```
+
+For **Maven/Gradle** projects, use the official scanners:
+
+```bash
+# Maven
+mvn -DskipTests=true sonar:sonar \
+  -Dsonar.host.url=http://YOUR_SERVER_IP:9000 \
+  -Dsonar.login=YOUR_TOKEN_HERE
+
+# Gradle
+./gradlew sonarqube \
+  -Dsonar.host.url=http://YOUR_SERVER_IP:9000 \
+  -Dsonar.login=YOUR_TOKEN_HERE
+```
+
+---
+
+# 5) Optional: Reverse proxy + TLS (Nginx)
+
+If you want HTTPS quickly (e.g., behind an ALB or with Nginx), add an **nginx** service and terminate TLS there. Example (HTTP pass-through):
+
+```yaml
+  nginx:
+    image: nginx:alpine
+    depends_on:
+      - sonarqube
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - sonar-net
+```
+
+**nginx.conf**
+
+```nginx
+server {
+  listen 80;
+  server_name _;
+
+  location / {
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_pass http://sonarqube:9000;
+  }
+}
+```
+
+(For TLS, add certs and `listen 443 ssl;` or place SonarQube behind an AWS ALB with HTTPS.)
+
+---
+
+# 6) Backups & upgrades
+
+**Backup Postgres & SQ data:**
+
+```bash
+# DB backup
+docker exec -t postgres-sonar pg_dump -U sonar sonarqube > sonarqube_$(date +%F).sql
+
+# SQ indices can always be rebuilt, but you may archive data/logs/extensions
+docker run --rm -v sq_data:/src -v $PWD:/dst alpine sh -c "cd /src && tar czf /dst/sq_data_$(date +%F).tgz ."
+```
+
+**Upgrade flow:**
+
+1. `docker compose pull` (fetch newer `sonarqube:latest-community`)
+2. `docker compose up -d`
+3. Visit **/setup** if SonarQube asks to migrate.
+4. Watch logs: `docker compose logs -f sonarqube`
+
+---
+
+# 7) Troubleshooting quick hits
+
+* **Service stuck / ES errors:**
+
+  * Ensure host **`vm.max_map_count=262144`** (verify with `sysctl vm.max_map_count`)
+  * Allocate more RAM (`-Xmx`), and increase Docker memory on Mac/Windows Desktop.
+* **Port 9000 in use:** change `ports: "9000:9000"` to another host port (e.g., `19000:9000`).
+* **DB auth failures:** check `.env` values and that `SONAR_JDBC_URL` points to `postgres` service, not `localhost`.
+* **Slow startup after upgrade:** ES reindexing can take several minutes; watch logs.
+* **Plugins:** drop JARs into `./sonar/extensions` (or upload via UI), then restart.
+
+---
+
+# 8) (Bonus) Jenkins integration in 90 seconds
+
+1. In Jenkins: **Manage Plugins → SonarQube Scanner** + (optional) **Quality Gates** plugins.
+2. **Manage Jenkins → System → SonarQube servers**: add `http://YOUR_SERVER_IP:9000` and a **Server token** credential.
+3. Pipeline snippet:
+
+```groovy
+pipeline {
+  agent any
+  environment {
+    SONARQUBE_SERVER = 'MySonar'   // name configured in Jenkins
+  }
+  stages {
+    stage('Checkout') { steps { checkout scm } }
+    stage('Build')    { steps { sh 'echo build your app here' } }
+    stage('SonarQube Scan') {
+      steps {
+        withSonarQubeEnv("${env.SONARQUBE_SERVER}") {
+          sh """
+            sonar-scanner \
+              -Dsonar.projectKey=inventory-manager \
+              -Dsonar.projectName=InventoryManager \
+              -Dsonar.host.url=$SONAR_HOST_URL
+          """
+        }
+      }
+    }
+    stage('Quality Gate') {
+      steps {
+        timeout(time: 5, unit: 'MINUTES') {
+          waitForQualityGate abortPipeline: true
+        }
+      }
+    }
+  }
+}
+```
+
+In SonarQube, set **Quality Gate** (e.g., “fail if Coverage < 80%”).
+
+---
+
+If you want, I can tailor this compose for **Amazon Linux 2023** hardening, add **NGINX + Let’s Encrypt**, or produce a **one-shot install script** that sets sysctls, writes the files, and brings the stack up automatically.
+
+
 Got you, Atul. Here’s a clean, production-friendly way to run SonarQube (Community) + PostgreSQL via Docker Compose—complete with persistence, healthchecks, and the host settings SonarQube needs. Then I’ll show two “use” paths: scanning a project from your laptop/runner, and scanning inside Docker.
 
 ⸻
