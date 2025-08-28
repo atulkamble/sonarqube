@@ -1,5 +1,30 @@
 # sonarqube
 
+```
+// Use sonarqube via docker 
+
+amazon linux | t3.medium | sonar.pem 
+SG: 9000 
+
+sudo yum update -y 
+sudo yum install docker -y 
+sudo systemctl start docker 
+sudo systemctl enable docker 
+sudo docker login
+
+
+sudo docker pull sonarqube:lts-enterprise
+sudo docker run -d -p 9000:9000 sonarqube:lts-enterprise 
+
+sudo docker container ls 
+
+// open browser and add http://instance-ip:9000 
+
+// enter username and password >> admin, admin 
+
+update password 
+```
+
 Installing and configuring SonarQube on an EC2 instance involves several steps, including setting up the server environment, installing dependencies, and configuring SonarQube itself. Here’s a detailed guide on how to get SonarQube running on Amazon Linux or Ubuntu:
 
 ### Prerequisites
