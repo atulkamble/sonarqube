@@ -3,7 +3,7 @@
 ```
 // Use sonarqube via docker 
 
-amazon linux | t3.medium | sonar.pem 
+amazon linux | t3.medium | sonar.pem | 25GB SSD 
 SG: 9000 
 
 sudo yum update -y 
@@ -12,9 +12,18 @@ sudo systemctl start docker
 sudo systemctl enable docker 
 sudo docker login
 
+sudo docker pull sonarqube:community
+sudo docker run -d -p 9000:9000 sonarqube:community
 
+OR
 sudo docker pull sonarqube:lts-enterprise
 sudo docker run -d -p 9000:9000 sonarqube:lts-enterprise 
+OR
+docker pull sonarqube:developer
+sudo docker run -d -p 9000:9000 sonarqube:developer
+
+docker pull sonarqube:datacenter-search
+docker pull sonarqube:datacenter-app
 
 sudo docker container ls 
 
