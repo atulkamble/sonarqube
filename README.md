@@ -149,23 +149,37 @@ java -version
 
     Add the following configuration:
 
-    ```ini
-    [Unit]
-    Description=SonarQube service
-    After=syslog.target network.target
+```ini
+[Unit]
+Description=SonarQube service
+After=network.target postgresql.service
+Wants=network-online.target
 
-    [Service]
-    Type=forking
-    ExecStart=/opt/sonarqube/bin/linux-x86-64/sonar.sh start
-    ExecStop=/opt/sonarqube/bin/linux-x86-64/sonar.sh stop
-    User=sonar
-    Group=sonar
-    Restart=on-failure
-    LimitNOFILE=65536
-    LimitNPROC=4096
+[Service]
+Type=simple
+User=sonarqube
+Group=sonarqube
+# IMPORTANT: never run as root; create user if needed:
+# sudo useradd -r -s /bin/false sonarqube && sudo chown -R sonarqube:sonarqube /opt/sonarqube
 
-    [Install]
-    WantedBy=multi-user.target
+ExecStart=/opt/sonarqube/bin/linux-x86-64/sonar.sh start
+ExecStop=/opt/sonarqube/bin/linux-x86-64/sonar.sh stop
+Restart=always
+RestartSec=10
+
+# File descriptors / processes for ES
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# If you previously injected tiny heaps via env, neutralize them:
+Environment="SONAR_WEB_JAVAOPTS="
+Environment="SONAR_SEARCH_JAVAOPTS="
+
+# Hardening
+SuccessExitStatus=143
+
+[Install]
+WantedBy=multi-user.target
     ```
 
     Then enable and start the service:
