@@ -1,10 +1,18 @@
 # SonarQube Course Presentation
 
+**Author:** Atul Kamble  
+**GitHub:** https://github.com/atulkamble  
+**LinkedIn:** https://www.linkedin.com/in/atuljkamble/
+
+---
+
 ## Slide 1: Title Slide
 **SonarQube: Mastering Code Quality & Security Analysis**
 - *A Comprehensive Course on Static Code Analysis*
-- Presenter: [Your Name]
-- Date: December 2025
+- **Author:** Atul Kamble
+- **GitHub:** [github.com/atulkamble](https://github.com/atulkamble)
+- **LinkedIn:** [linkedin.com/in/atuljkamble](https://www.linkedin.com/in/atuljkamble/)
+- **Date:** December 2025
 
 ---
 
@@ -348,9 +356,10 @@ public class CustomNamingRule extends BaseTreeVisitor implements JavaFileScanner
 - Custom rule development timeline?
 
 📧 **Contact Information:**
-- Course materials: [GitHub Repository]
-- Follow-up questions: [Email]
-- Community support: [Slack/Discord]
+- **Course Author:** Atul Kamble
+- **GitHub:** [github.com/atulkamble](https://github.com/atulkamble)
+- **LinkedIn:** [linkedin.com/in/atuljkamble](https://www.linkedin.com/in/atuljkamble/)
+- **Course Repository:** [github.com/atulkamble/sonar-course](https://github.com/atulkamble/sonar-course)
 
 ---
 
